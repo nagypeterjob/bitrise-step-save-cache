@@ -13,10 +13,14 @@ import (
 )
 
 type Input struct {
-	Verbose     bool   `env:"verbose,required"`
-	Key         string `env:"key,required"`
-	Paths       string `env:"paths,required"`
-	IsKeyUnique bool   `env:"is_key_unique"`
+	Verbose            bool            `env:"verbose,required"`
+	Key                string          `env:"key,required"`
+	Paths              string          `env:"paths,required"`
+	IsKeyUnique        bool            `env:"is_key_unique"`
+	AWSBucket          string          `env:"aws_bucket"`
+	AWSRegion          string          `env:"aws_region"`
+	AWSAccessKeyID     stepconf.Secret `env:"aws_access_key_id"`
+	AWSSecretAccessKey stepconf.Secret `env:"aws_secret_access_key"`
 }
 
 type SaveCacheStep struct {
@@ -53,10 +57,14 @@ func (step SaveCacheStep) Run() error {
 
 	saver := cache.NewSaver(step.envRepo, step.logger, step.pathProvider, step.pathModifier, step.pathChecker)
 	return saver.Save(cache.SaveCacheInput{
-		StepId:      "save-cache",
-		Verbose:     input.Verbose,
-		Key:         input.Key,
-		Paths:       strings.Split(input.Paths, "\n"),
-		IsKeyUnique: input.IsKeyUnique,
+		StepId:             "save-cache",
+		Verbose:            input.Verbose,
+		Key:                input.Key,
+		Paths:              strings.Split(input.Paths, "\n"),
+		IsKeyUnique:        input.IsKeyUnique,
+		AWSBucket:          input.AWSBucket,
+		AWSRegion:          input.AWSRegion,
+		AWSAccessKeyID:     string(input.AWSAccessKeyID),
+		AWSSecretAccessKey: string(input.AWSSecretAccessKey),
 	})
 }
