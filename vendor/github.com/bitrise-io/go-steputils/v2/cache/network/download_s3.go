@@ -2,8 +2,8 @@ package network
 
 import (
 	"context"
-	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"errors"
@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -75,7 +76,6 @@ func DownloadFromS3(ctx context.Context, params S3DownloadParams, logger log.Log
 }
 
 func (service *s3DownloadService) downloadWithS3Client(ctx context.Context, cacheKeys []string, logger log.Logger) (string, error) {
-	var matchedKey string
 	var firstValidKey string
 	err := retry.Times(uint(service.numFullRetries)).Wait(5 * time.Second).TryWithAbort(func(attempt uint) (error, bool) {
 		for _, key := range cacheKeys {
@@ -91,7 +91,6 @@ func (service *s3DownloadService) downloadWithS3Client(ctx context.Context, cach
 				return err, false
 			}
 
-			matchedKey = keyFound
 			firstValidKey = keyFound
 			return nil, true
 		}
@@ -112,7 +111,7 @@ func (service *s3DownloadService) downloadWithS3Client(ctx context.Context, cach
 		return "", fmt.Errorf("all retries failed: %w", err)
 	}
 
-	return matchedKey, nil
+	return firstValidKey, nil
 }
 
 func (service *s3DownloadService) firstAvailableKey(ctx context.Context, key string) (string, error) {
@@ -137,27 +136,24 @@ func (service *s3DownloadService) firstAvailableKey(ctx context.Context, key str
 }
 
 func (service *s3DownloadService) getObject(ctx context.Context, key string) error {
-	result, err := service.client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(service.bucket),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		return fmt.Errorf("get object: %w", err)
-
-	}
-	defer result.Body.Close() //nolint:errcheck
 	file, err := os.Create(service.downloadPath)
 	if err != nil {
 		return fmt.Errorf("creating file: %w", err)
 	}
 	defer file.Close() //nolint:errcheck
-	body, err := io.ReadAll(result.Body)
+
+	downloader := manager.NewDownloader(service.client, func(d *manager.Downloader) {
+		// 50MB
+		d.PartSize = 50 * 1024 * 1024
+		d.Concurrency = runtime.NumCPU()
+	})
+
+	_, err = downloader.Download(ctx, file, &s3.GetObjectInput{
+		Bucket: aws.String(service.bucket),
+		Key:    aws.String(key),
+	})
 	if err != nil {
-		return fmt.Errorf("read object content: %w", err)
-	}
-	_, err = file.Write(body)
-	if err != nil {
-		return fmt.Errorf("write file: %w", err)
+		return fmt.Errorf("get object: %w", err)
 	}
 
 	return nil
